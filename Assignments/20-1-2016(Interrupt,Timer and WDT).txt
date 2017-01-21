@@ -1,0 +1,146 @@
+// Assignment s01 20Jan2016
+// step 1 : Timer0 -> Timer2
+// step 2 :
+
+// Nu_LB-002: L01_04_Timer_WDT.c
+// timer up every 1 second
+
+/*--------------------------------------------------------------------------*/
+/*                                                                          */
+/* Copyright (c) Nuvoton Technology Corp. All rights reserved.              */
+/* edited: june 2014: dejwoot.kha@mail.kmutt.ac.th                          */
+/*--------------------------------------------------------------------------*/
+
+#include <stdio.h>	
+#include <string.h>																										 
+#include "NUC1xx.h"
+#include "LCD_Driver.h"
+#include "Driver\DrvGPIO.h"
+#include "Driver\DrvSYS.h"
+#include "Seven_Segment.h"
+#include "scankey.h"
+
+#define DELAY300ms	300000 		// The maximal delay time is 335000 us.
+
+void EINT1Callback(void) {
+	UNLOCKREG();
+	clr_all_pannal();
+	WDT->WTCR.WTR = 1;
+	LOCKREG();
+	print_lcd(0, "Int1 !!!!");
+	DrvSYS_Delay(DELAY300ms);		// delay
+	}
+
+
+static uint16_t TIMER2Counter = 0;
+
+//-----------------------------------------------------------------------WDT
+void InitWDT(void) {
+	UNLOCKREG();		
+	/* Step 1. Enable and Select WDT clock source */         
+	SYSCLK->CLKSEL1.WDT_S = 3;	// Select 10kHz for WDT clock source  	
+	SYSCLK->APBCLK.WDT_EN = 1;	// Enable WDT clock source	
+
+	/* Step 2. Select Timeout Interval */
+	WDT->WTCR.WTIS = 6;					// 2^16 * (1/10k) = 6.5536 sec.
+	
+	/* Step 3. Disable Watchdog Timer Reset function */
+	WDT->WTCR.WTRE = 0;
+
+	/* Step 4. Enable WDT interrupt */	
+	WDT->WTCR.WTIF = 1;					// Write 1 to clear flag	
+	WDT->WTCR.WTIE = 1;
+	NVIC_EnableIRQ(WDT_IRQn);
+
+	/* Step 5. Enable WDT module */
+	WDT->WTCR.WTE = 1;					// Enable WDT
+	WDT->WTCR.WTR = 1;					// Clear WDT counter
+	LOCKREG();
+	}
+	
+void WDT_IRQHandler(void) {
+	UNLOCKREG();
+	WDT->WTCR.WTIF = 1;
+	WDT->WTCR.WTR = 1;
+	UNLOCKREG();
+	print_lcd(3, "WDT interrupt");
+	}
+
+//---------------------------------------------------------------------TIMER
+void InitTIMER2(void) {
+	/* Step 0. GPIO initial */
+	SYS->GPBMFP.TM2_SS01 = 1;				// System Manager Control Registers
+	
+	/* Step 1. Enable and Select Timer clock source */          
+	SYSCLK->CLKSEL1.TMR2_S = 0;	// Select 12Mhz for TIMER2 clock source
+	// 0 = 12 MHz, 1 = 32 kHz, 2 = HCLK, 7 = 22.1184 MHz
+	SYSCLK->APBCLK.TMR2_EN = 1;	// Enable TIMER2 clock source
+
+	/* Step 2. Select Operation mode */	
+	TIMER2->TCSR.MODE = 2;			// 2 -> Select Toggle mode
+	// 0 = One shot, 1 = Periodic, 2 = Toggle, 3 = continuous counting mode
+	
+	/* Step 3. Select Time out period 
+	= (Period of timer clock input) * (8-bit Prescale + 1) * (24-bit TCMP)*/
+	TIMER2->TCSR.PRESCALE = 11;	// Set Prescale [0~255]
+	TIMER2->TCMPR = 1000000;		// Set TCMPR [0~16777215]
+	// (1/12000000)*(11+1)*(1000000)= 1 sec or 1 Hz
+
+	/* Step 4. Enable interrupt */
+	TIMER2->TCSR.IE = 1;
+	TIMER2->TISR.TIF = 1;				// Write 1 to clear the interrupt flag 		
+	NVIC_EnableIRQ(TMR2_IRQn);	// Enable TIMER2 Interrupt
+
+	/* Step 5. Enable Timer module */
+	TIMER2->TCSR.CRST = 1;			// Reset up counter
+	TIMER2->TCSR.CEN = 1;				// Enable TIMER2
+	}
+
+void TMR2_IRQHandler(void) {	// TIMER2 interrupt subroutine 
+	char lcd2_buffer[18] = "TIMER2:";
+	TIMER2Counter += 1;
+	sprintf(lcd2_buffer+7, " %d s.", TIMER2Counter);
+	print_lcd(2, lcd2_buffer);
+ 	TIMER2->TISR.TIF = 1;    		// Write 1 to clear the interrupt flag 
+	}
+
+//----------------------------------------------------------------------MAIN
+int32_t main (void) {
+	int8_t number;
+
+	UNLOCKREG();
+	SYSCLK->PWRCON.XTL12M_EN = 1;
+	SYSCLK->CLKSEL0.HCLK_S = 0;
+	LOCKREG();
+
+	Initial_pannel();  // call initial pannel function
+	clr_all_pannal();
+	                        
+	InitTIMER2();
+	InitWDT();
+	/* Configure general GPIO interrupt */
+	DrvGPIO_Open(E_GPB, 15, E_IO_INPUT);
+
+	/* Configure external interrupt */
+	DrvGPIO_EnableEINT1(E_IO_BOTH_EDGE, E_MODE_EDGE, EINT1Callback);
+
+	OpenKeyPad();	
+	while(1) {
+		number = Scankey();           // scan keypad to get a number (1~9
+		if(number == 9){
+			UNLOCKREG();
+	clr_all_pannal();
+	WDT->WTCR.WTR = 1;
+	LOCKREG();
+			}
+		if(number == 5){
+			UNLOCKREG();
+			WDT->WTCR.WTIS = 5;
+			LOCKREG();
+			}
+		show_seven_segment(0,number); // display number on 7-segment LEDs
+		DrvSYS_Delay(5000);           // delay time for keeping 7-segment display 
+		close_seven_segment();	      // turn off 7-segment LEDs	
+		__NOP();
+		}
+	}

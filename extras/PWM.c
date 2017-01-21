@@ -1,5 +1,3 @@
-// Powerd By : Khun Dej Libs >////<
-// Make Micropro More Easy XD
 // Nu_LB-002:	L02_01_PWMgen.c
 
 //	PWM1 -> GPA13 High level: 262 msec, Low level: 786 msec
